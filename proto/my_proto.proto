@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package demo;
+
+// A deliberately "big" object
+message BigObject {
+  uint64 id = 1;
+  string name = 2;
+  string description = 3;
+
+  // Big payloads
+  repeated double values = 4;
+  repeated string tags = 5;
+}
+
+// Container holding an array of big objects
+message BigObjectArray {
+  repeated BigObject objects = 1;
+}
