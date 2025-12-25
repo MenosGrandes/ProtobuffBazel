@@ -34,7 +34,7 @@ if [[ ! -f "$BENCH_BINARY" ]]; then
     echo "Error: benchmark binary not found: $BENCH_BINARY" >&2
     exit 1
 fi
-
+rm -rf results.csv
 "$BENCH_BINARY" --benchmark_min_time=2s \
   --benchmark_repetitions=5 \
   --benchmark_report_aggregates_only=true \

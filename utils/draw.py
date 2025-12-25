@@ -3,15 +3,8 @@ import matplotlib.pyplot as plt
 import mplcursors
 import sys
 
-# --- Command-line arguments ---
-if len(sys.argv) < 3:
-    print("Usage: python draw.py <Benchmark1> <Benchmark2> [csv_file]")
-    print("Example: python draw.py StdStringConcat CordConcat results.csv")
-    sys.exit(1)
-
-bench1_str = sys.argv[1]
-bench2_str = sys.argv[2]
-csv_file = sys.argv[3] if len(sys.argv) > 3 else "results.csv"
+# --- CSV file from command-line or default ---
+csv_file = sys.argv[1] if len(sys.argv) > 1 else "results.csv"
 
 # --- Load CSV ---
 df = pd.read_csv(csv_file)
@@ -26,28 +19,21 @@ def extract_size(name: str) -> int:
 
 df["size"] = df["name"].apply(extract_size)
 
-# Filter benchmarks
-bench1 = df[df["name"].str.contains(f"/BM_{bench1_str}/")]
-bench2 = df[df["name"].str.contains(f"/BM_{bench2_str}/")]
+# --- Find all unique benchmark types containing BM_ ---
+benchmarks = sorted(set(s.split("/")[1][3:] for s in df['name'] if "/BM_" in s))
+if not benchmarks:
+    raise ValueError("No benchmarks with 'BM_' found in CSV.")
 
-if bench1.empty:
-    available = ", ".join(sorted(set(s.split("/")[1][3:] for s in df['name'])))
-    raise ValueError(f"No benchmark matching '{bench1_str}' found. Available: {available}")
-if bench2.empty:
-    available = ", ".join(sorted(set(s.split("/")[1][3:] for s in df['name'])))
-    raise ValueError(f"No benchmark matching '{bench2_str}' found. Available: {available}")
+# --- Prepare a merged dataframe with all benchmarks on same size ---
+merged = df[['size']].drop_duplicates().sort_values('size')
+for bench in benchmarks:
+    bench_df = df[df["name"].str.contains(f"/BM_{bench}/")][['size','real_time']].rename(
+        columns={'real_time': bench})
+    merged = pd.merge(merged, bench_df, on='size', how='left')
 
-# Merge on size to align datasets
-merged = pd.merge(
-    bench1[['size','real_time']],
-    bench2[['size','real_time']],
-    on='size',
-    suffixes=(f'_{bench1_str}', f'_{bench2_str}')
-)
-
-# Compute percentage speedup
-merged['percent_speedup'] = (merged[f'real_time_{bench1_str}'] - merged[f'real_time_{bench2_str}']) \
-                             / merged[f'real_time_{bench2_str}'] * 100
+# --- Assign consistent colors ---
+colors = plt.cm.tab10.colors  # 10 distinct colors
+bench_colors = {bench: colors[i % len(colors)] for i, bench in enumerate(benchmarks)}
 
 # --- Helper: format time ---
 def format_time_ns(ns: float) -> str:
@@ -60,41 +46,58 @@ def format_time_ns(ns: float) -> str:
     else:
         return f"{ns/1e9:.2f} s"
 
-# --- Plot ---
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12,10), sharex=True)
-plt.subplots_adjust(hspace=0.3)
+# --- Figure 1: Raw times ---
+fig_times, ax_times = plt.subplots(figsize=(14,6))
+lines_times = []
+for bench in benchmarks:
+    line, = ax_times.plot(merged['size'], merged[bench], 'o-', label=bench, color=bench_colors[bench])
+    lines_times.append(line)
 
-# Top: raw times
-line1, = ax1.plot(merged['size'], merged[f'real_time_{bench1_str}'], 'o-', label=bench1_str)
-line2, = ax1.plot(merged['size'], merged[f'real_time_{bench2_str}'], 's-', label=bench2_str)
-ax1.set_xscale('log', base=2)
-ax1.set_yscale('log')
-ax1.set_ylabel('Time')
-ax1.set_title(f'Benchmark: {bench1_str} vs {bench2_str}')
-ax1.grid(True, which='both', ls='--', alpha=0.5)
-ax1.legend()
+ax_times.set_xscale('log', base=2)
+ax_times.set_yscale('log')
+ax_times.set_xlabel('Message size (objects)')
+ax_times.set_ylabel('Time')
+ax_times.set_title('All benchmark comparisons (_mean)')
+ax_times.grid(True, which='both', ls='--', alpha=0.5)
+ax_times.legend()
 
-# Bottom: percentage speedup
-line3, = ax2.plot(merged['size'], merged['percent_speedup'], 'o-', color='green', label=f'{bench2_str} faster (%)')
-ax2.axhline(0, color='black', linestyle='--', linewidth=1)
-ax2.set_xscale('log', base=2)
-ax2.set_xlabel('Message size (objects)')
-ax2.set_ylabel('Speedup (%)')
-ax2.set_title('Percentage speedup per message size')
-ax2.grid(True, which='both', ls='--', alpha=0.5)
-ax2.legend()
-
-# --- Interactive hover tooltips ---
-cursor1 = mplcursors.cursor([line1, line2], hover=True)
-cursor1.connect("add", lambda sel: sel.annotation.set_text(
+cursor_times = mplcursors.cursor(lines_times, hover=True)
+cursor_times.connect("add", lambda sel: sel.annotation.set_text(
     f"{sel.artist.get_label()}\nSize: {int(merged['size'].iloc[int(sel.index)])}\n"
     f"Time: {format_time_ns(sel.artist.get_ydata()[int(sel.index)])}"
 ))
 
-cursor2 = mplcursors.cursor(line3, hover=True)
-cursor2.connect("add", lambda sel: sel.annotation.set_text(
-    f"Size: {int(merged['size'].iloc[int(sel.index)])}\n"
-    f"Speedup: {sel.artist.get_ydata()[int(sel.index)]:.2f} %"
-))
+# --- Figure 2: All speedups in subplots ---
+n = len(benchmarks)
+fig_speed, axes = plt.subplots(n, 1, figsize=(14, 4*n), sharex=True)
+if n == 1:
+    axes = [axes]  # ensure iterable
 
+for i, base_bench in enumerate(benchmarks):
+    ax = axes[i]
+    lines_speed = []
+    for other_bench in benchmarks:
+        if other_bench == base_bench:
+            continue
+        speedup = (merged[base_bench] - merged[other_bench]) / merged[other_bench] * 100
+        line, = ax.plot(merged['size'], speedup, 'o-', label=f'{other_bench} vs {base_bench}', color=bench_colors[other_bench])
+        lines_speed.append(line)
+
+    ax.axhline(0, color='black', linestyle='--', linewidth=1)
+    ax.set_xscale('log', base=2)
+    ax.set_ylabel('Speedup (%)')
+    ax.set_title(f'Speedups using {base_bench} as base')
+    ax.grid(True, which='both', ls='--', alpha=0.5)
+    ax.legend()
+
+    cursor_speed = mplcursors.cursor(lines_speed, hover=True)
+    cursor_speed.connect("add", lambda sel: sel.annotation.set_text(
+        f"{sel.artist.get_label()}\nSize: {int(merged['size'].iloc[int(sel.index)])}\n"
+        f"Speedup: {sel.artist.get_ydata()[int(sel.index)]:.2f} %"
+    ))
+
+axes[-1].set_xlabel('Message size (objects)')
+plt.tight_layout()
+
+# --- Show both figures at once ---
 plt.show()
