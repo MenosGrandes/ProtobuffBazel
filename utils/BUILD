@@ -11,3 +11,9 @@ filegroup(
     visibility = ["//bench:__pkg__"], #the bench is name of FOLDER!
 
 )
+filegroup(
+    name = "run_perf_sh",
+    srcs = ["run_perf.sh"],
+    visibility = ["//bench:__pkg__"], #the bench is name of FOLDER!
+
+)
