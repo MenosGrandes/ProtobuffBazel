@@ -42,10 +42,9 @@ rm -rf results.csv
 
 pid=$!
 spinner $pid
-
 # Wait for command to finish
 wait $pid
 exit_code=$?
 
-echo "Done: exit code $exit_code"
+#echo "Done: exit code $exit_code"
 python3 "$PYTHON_SCRIPT" "$@"

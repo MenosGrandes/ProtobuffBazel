@@ -16,14 +16,14 @@
 #include <string_view>
 #include <cassert>
 static constexpr auto PAGE_DEFAULT_SIZE{4096};
-
+// Basic arena state
 struct ArenaState
 {
     struct Block
     {
         Block *next;
         size_t used;
-        alignas(std::max_align_t) char data[PAGE_DEFAULT_SIZE];
+        alignas(std::max_align_t) char data[4096];
     };
 
     Block *head = nullptr;
@@ -41,8 +41,9 @@ struct ArenaState
     void *allocate(size_t size, size_t align)
     {
         if (!head || !has_space(head, size, align))
+        {
             add_block();
-
+        }
         char *p = align_ptr(head->data + head->used, align);
         head->used = (p + size) - head->data;
         return p;
@@ -69,33 +70,50 @@ private:
         head = b;
     }
 };
+
 template <typename T>
 class ArenaAllocator
 {
-    ArenaState *state_;
-
 public:
     using value_type = T;
 
-    explicit ArenaAllocator(ArenaState &s) noexcept
-        : state_(&s) {}
+    explicit ArenaAllocator(ArenaState *arena = nullptr) noexcept
+        : arena_(arena) {}
 
     template <typename U>
     ArenaAllocator(const ArenaAllocator<U> &other) noexcept
-        : state_(other.state_) {}
+        : arena_(other.arena_) {}
 
     T *allocate(std::size_t n)
     {
-        return static_cast<T *>(
-            state_->allocate(sizeof(T) * n, alignof(T)));
+        void *ptr = arena_->allocate(n * sizeof(T), alignof(T));
+        return static_cast<T *>(ptr);
     }
 
     void deallocate(T *, std::size_t) noexcept {}
 
     template <typename U>
-    friend class ArenaAllocator;
+    struct rebind
+    {
+        using other = ArenaAllocator<U>;
+    };
+
+    ArenaState *arena_;
 };
 
+// Comparison operators (required by standard allocator interface)
+template <typename T, typename U>
+inline bool operator==(const ArenaAllocator<T> &a, const ArenaAllocator<U> &b) noexcept
+{
+    return a.arena_ == b.arena_;
+}
+
+template <typename T, typename U>
+inline bool operator!=(const ArenaAllocator<T> &a, const ArenaAllocator<U> &b) noexcept
+{
+    return !(a == b);
+}
+/*
 template <typename CharT = char>
 class Cord
 {
@@ -135,7 +153,6 @@ public:
     template <typename Buffer>
     void write_to(Buffer &out) const
     {
-        // 1️⃣ Precompute total size
         size_t total_size = 0;
         for (Node *n = head_; n; n = n->next)
         {
@@ -150,6 +167,7 @@ public:
         }
     }
 };
+*/
 namespace flatcord
 {
     struct Slice
@@ -158,33 +176,32 @@ namespace flatcord
         size_t size;
     };
 
+    template <typename SliceAlloc = std::allocator<Slice>>
     class Cord
     {
+        using Traits = std::allocator_traits<SliceAlloc>;
+
     public:
-        explicit Cord(ArenaState &arena)
-            : arena_(&arena), slices_(nullptr), sliceCount(0), capacity_(0), total_bytes_(0) {}
+        explicit Cord(const SliceAlloc &alloc = SliceAlloc())
+            : alloc_(alloc), slices_(nullptr), sliceCount(0), capacity_(0), total_bytes_(0) {}
 
         void append(const char *data, size_t size)
         {
             ensure_capacity(sliceCount + 1);
-            slices_[sliceCount++] = {data, size};
+            Traits::construct(alloc_, &slices_[sliceCount], Slice{data, size});
+            sliceCount++;
             total_bytes_ += size;
         }
 
-        void append(std::string_view sv)
-        {
-            append(sv.data(), sv.size());
-        }
+        void append(std::string_view sv) { append(sv.data(), sv.size()); }
 
         size_t size_bytes() const { return total_bytes_; }
 
         template <typename Buffer>
         void write_to(Buffer &out) const
         {
-
             out.reserve(total_bytes_);
-
-            for (std::size_t i{0}; i < sliceCount; i++)
+            for (size_t i = 0; i < sliceCount; i++)
             {
                 out.write(slices_[i].data, slices_[i].size);
             }
@@ -198,59 +215,72 @@ namespace flatcord
 
             size_t new_cap = capacity_ ? capacity_ * 2 : 8;
             while (new_cap < needed)
-            {
                 new_cap *= 2;
+
+            Slice *new_slices = Traits::allocate(alloc_, new_cap);
+            for (size_t i = 0; i < sliceCount; i++)
+            {
+                Traits::construct(alloc_, &new_slices[i], slices_[i]);
             }
-
-            using Alloc = ArenaAllocator<Slice>;
-            Alloc alloc(*arena_);
-            Slice *new_slices = alloc.allocate(new_cap);
-
-            memcpy(new_slices, slices_, sliceCount * sizeof(Slice));
+            for (size_t i = 0; i < sliceCount; i++)
+            {
+                Traits::destroy(alloc_, &slices_[i]);
+            }
+            if (slices_)
+            {
+                Traits::deallocate(alloc_, slices_, capacity_);
+            }
 
             slices_ = new_slices;
             capacity_ = new_cap;
         }
 
-        ArenaState *arena_;
-        Slice *slices_;
-        size_t sliceCount;
-        size_t capacity_;
-        size_t total_bytes_;
+        SliceAlloc alloc_;
+        Slice *slices_{nullptr};
+        std::size_t sliceCount;
+        std::size_t capacity_;
+        std::size_t total_bytes_;
     };
 } // namespace flatcord
 
+template <typename Alloc = std::allocator<char>>
 class MemoryBuffer
 {
+    using Traits = std::allocator_traits<Alloc>;
+    Alloc alloc_;
     char *data_ = nullptr;
     size_t size_ = 0;
     size_t capacity_ = 0;
 
 public:
+    explicit MemoryBuffer(const Alloc &alloc = Alloc()) : alloc_(alloc) {}
     ~MemoryBuffer()
     {
-        std::free(data_);
+        if (data_)
+        {
+            Traits::deallocate(alloc_, data_, capacity_);
+        }
     }
 
     const char *data() const { return data_; }
     size_t size() const { return size_; }
-
     void clear() { size_ = 0; }
 
     void write(const char *src, size_t len)
     {
         if (size_ + len > capacity_)
+        {
             grow(size_ + len);
-
+        }
         std::memcpy(data_ + size_, src, len);
         size_ += len;
     }
+
     void reserve(size_t new_cap)
     {
         if (capacity_ < new_cap)
         {
-            data_ = static_cast<char *>(std::realloc(data_, new_cap));
-            capacity_ = new_cap;
+            grow(new_cap);
         }
     }
 
@@ -259,9 +289,18 @@ private:
     {
         size_t new_cap = capacity_ ? capacity_ : 64;
         while (new_cap < min_capacity)
+        {
             new_cap *= 2;
+        }
 
-        data_ = static_cast<char *>(std::realloc(data_, new_cap));
+        char *new_data = Traits::allocate(alloc_, new_cap);
+        if (data_)
+        {
+            std::memcpy(new_data, data_, size_);
+            Traits::deallocate(alloc_, data_, capacity_);
+        }
+
+        data_ = new_data;
         capacity_ = new_cap;
     }
 };
