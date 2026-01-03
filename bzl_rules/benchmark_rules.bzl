@@ -15,7 +15,7 @@ def benchmark_suite(
             "@google_benchmark//:benchmark_main",
         ],
         linkopts = ["-pthread"],
-        copts = ["-O2", "-g"],
+        copts = ["-O1", "-g3"],
         visibility = visibility,
     )
 
@@ -34,6 +34,15 @@ def benchmark_suite(
     sh_binary(
         name = "run_perf_" + name,
         srcs = ["//utils:run_perf_sh"],
+        data = [
+            ":benchmark_" + name,
+        ],
+        args = ["$(location :benchmark_" + name + ")"],
+    )
+    # Valgrind runner
+    sh_binary(
+        name = "run_valgrind_" + name,
+        srcs = ["//utils:run_valgrind_sh"],
         data = [
             ":benchmark_" + name,
         ],

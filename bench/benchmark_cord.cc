@@ -1,92 +1,88 @@
-#include <benchmark/benchmark.h>
+#include "cord/inc/arenaAllocator.h"
 #include "cord/inc/cord.h"
-#include <iostream>
+#include "cord/inc/memoryBuffer.h"
+#include <benchmark/benchmark.h>
+
+#include <random>
 #include <string>
+#include <vector>
 
 static constexpr auto MIN_RANGE{10};
-static constexpr auto MAX_RANGE{50};
-static constexpr auto count_per_bucket{100};  // adjust as needed
-static constexpr auto MAX_STRING_LENGTH{220}; // adjust as needed
+static constexpr auto MAX_RANGE{100};
+static constexpr auto STEP{10};
 
-struct StringConcatFixture : public benchmark::Fixture
-{
-    static std::vector<std::vector<std::string>> data;
+static constexpr auto count_per_bucket{100};  // adjust as needed
+static constexpr auto MAX_STRING_LENGTH{320}; // adjust as needed
+
+struct StringConcatFixture : public benchmark::Fixture {
+  static std::vector<std::vector<std::string>> data;
 };
 
-inline size_t FixedLength(size_t bucket, std::mt19937 &)
-{
-    return bucket;
-}
+inline size_t FixedLength(size_t bucket, std::mt19937 &) { return bucket; }
 
-inline size_t RandomLength(size_t bucket, std::mt19937 &rng)
-{
-    std::uniform_int_distribution<size_t> dist(1, bucket);
-    return dist(rng);
+inline size_t RandomLength(size_t bucket, std::mt19937 &rng) {
+  std::uniform_int_distribution<size_t> dist(1, bucket);
+  return dist(rng);
 }
 
 template <typename LengthFn>
 std::vector<std::vector<std::string>>
-MakeBenchmarkData(size_t max_len,
-                  size_t count_per_bucket,
-                  LengthFn length_fn)
-{
-    std::vector<std::vector<std::string>> data;
-    data.resize(max_len + 1);
+MakeBenchmarkData(size_t max_len, size_t count_per_bucket, LengthFn length_fn) {
+  std::vector<std::vector<std::string>> data;
+  data.resize(max_len + 1);
 
-    std::mt19937 rng(123); // deterministic seed
-    std::uniform_int_distribution<size_t> char_dist(0, 61);
+  std::mt19937 rng(123); // deterministic seed
+  std::uniform_int_distribution<size_t> char_dist(0, 61);
 
-    static constexpr char alphabet[] =
-        "abcdefghijklmnopqrstuvwxyz"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "0123456789";
+  static constexpr char alphabet[] = "abcdefghijklmnopqrstuvwxyz"
+                                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                     "0123456789";
 
-    for (size_t bucket = 1; bucket <= max_len; ++bucket)
-    {
-        auto &vec = data[bucket];
-        vec.reserve(count_per_bucket);
+  for (size_t bucket = 1; bucket <= max_len; ++bucket) {
+    auto &vec = data[bucket];
+    vec.reserve(count_per_bucket);
 
-        for (size_t i = 0; i < count_per_bucket; ++i)
-        {
-            const size_t len = length_fn(bucket, rng);
+    for (size_t i = 0; i < count_per_bucket; ++i) {
+      const size_t len = length_fn(bucket, rng);
 
-            std::string s;
-            s.resize(len);
+      std::string s;
+      s.resize(len);
 
-            for (size_t j = 0; j < len; ++j)
-                s[j] = alphabet[char_dist(rng)];
+      for (size_t j = 0; j < len; ++j)
+        s[j] = alphabet[char_dist(rng)];
 
-            vec.push_back(std::move(s));
-        }
+      vec.push_back(std::move(s));
     }
+  }
 
-    return data;
+  return data;
 }
 std::vector<std::vector<std::string>> StringConcatFixture::data =
-    MakeBenchmarkData(MAX_STRING_LENGTH, count_per_bucket, RandomLength);
-/*
-BENCHMARK_DEFINE_F(StringConcatFixture, BM_StdStringConcat)(benchmark::State &state)
-{
-    const auto &bucket = data[state.range(0)];
+    MakeBenchmarkData(MAX_STRING_LENGTH, count_per_bucket, FixedLength);
 
-    for (auto _ : state)
-    {
-        std::string result;
-        for (const auto &s : bucket)
-            result += s;
+BENCHMARK_DEFINE_F(StringConcatFixture, BM_StdStringConcat)
+(benchmark::State &state) {
+  const auto &bucket = data[state.range(0)];
 
-        benchmark::DoNotOptimize(result);
-        benchmark::ClobberMemory();
-    }
+  for (auto _ : state) {
+    std::string result;
+    for (const auto &s : bucket)
+      result += s;
 
-    state.SetBytesProcessed(static_cast<int64_t>(
-        state.iterations() * bucket.size() * state.range(0)));
+    benchmark::DoNotOptimize(result);
+    benchmark::ClobberMemory();
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations() *
+                                               bucket.size() * state.range(0)));
 }
 BENCHMARK_REGISTER_F(StringConcatFixture, BM_StdStringConcat)
-    ->DenseRange(MIN_RANGE, MAX_RANGE)
+    ->DenseRange(MIN_RANGE, MAX_RANGE, STEP)
     ->Unit(benchmark::kNanosecond);
-*/
-BENCHMARK_DEFINE_F(StringConcatFixture, BM_StdStringConcatReserve)(benchmark::State &state)
+
+/*
+BENCHMARK_DEFINE_F(StringConcatFixture,
+BM_StdStringConcatReserve)(benchmark::State &state)
 {
     const auto &bucket = data[state.range(0)];
     size_t total_len = 0;
@@ -110,7 +106,7 @@ BENCHMARK_DEFINE_F(StringConcatFixture, BM_StdStringConcatReserve)(benchmark::St
 }
 
 BENCHMARK_REGISTER_F(StringConcatFixture, BM_StdStringConcatReserve)
-    ->DenseRange(MIN_RANGE, MAX_RANGE)
+    ->DenseRange(MIN_RANGE, MAX_RANGE, STEP)
     ->Unit(benchmark::kNanosecond);
 
 /*
@@ -148,40 +144,75 @@ BENCHMARK_REGISTER_F(StringConcatFixture, BM_CordConcat)
     ->DenseRange(MIN_RANGE, MAX_RANGE)
     ->Unit(benchmark::kNanosecond);
 */
-BENCHMARK_DEFINE_F(StringConcatFixture, BM_FlatCordConcat)(benchmark::State &state)
-{
-    const auto &bucket = data[state.range(0)];
+BENCHMARK_DEFINE_F(StringConcatFixture, BM_FlatCordConcat)
+(benchmark::State &state) {
+  const auto &bucket = data[state.range(0)];
 
-    for (auto _ : state)
-    {
-        using AllocSlice = ArenaAllocator<flatcord::Slice>;
-        using AllocChar = ArenaAllocator<char>;
+  for (auto _ : state) {
+    using AllocSlice = ArenaAllocator<flatcord::Slice>;
+    using AllocChar = ArenaAllocator<char>;
 
-        ArenaState arena;
-        AllocSlice alloc(&arena);
-        flatcord::Cord<AllocSlice> cord(alloc);
-        for (const auto &s : bucket)
-        {
-            cord.append(s);
-        }
-        AllocChar alloc2(&arena);
-        MemoryBuffer<ArenaAllocator<char>> buf(alloc2);
-
-        cord.write_to(buf);
-
-        benchmark::DoNotOptimize(buf.data());
-        benchmark::DoNotOptimize(buf.size());
-        benchmark::ClobberMemory();
+    ArenaState arena;
+    AllocSlice alloc(&arena);
+    flatcord::Cord<AllocSlice> cord(alloc);
+    for (const auto &s : bucket) {
+      cord.append(s);
     }
+    ArenaState arena2;
+    AllocChar alloc2(&arena2);
+    MemoryBuffer<ArenaAllocator<char>> buf(alloc2);
 
-    std::size_t total_bytes = 0;
-    for (const auto &s : bucket)
-        total_bytes += s.size();
+    cord.write_to(buf);
 
-    state.SetBytesProcessed(static_cast<int64_t>(
-        state.iterations() * total_bytes));
+    benchmark::DoNotOptimize(buf.data());
+    benchmark::DoNotOptimize(buf.size());
+    benchmark::ClobberMemory();
+  }
+
+  std::size_t total_bytes = 0;
+  for (const auto &s : bucket)
+    total_bytes += s.size();
+
+  state.SetBytesProcessed(
+      static_cast<int64_t>(state.iterations() * total_bytes));
 }
 
 BENCHMARK_REGISTER_F(StringConcatFixture, BM_FlatCordConcat)
-    ->DenseRange(MIN_RANGE, MAX_RANGE)
+    ->DenseRange(MIN_RANGE, MAX_RANGE, STEP)
+    ->Unit(benchmark::kNanosecond);
+
+BENCHMARK_DEFINE_F(StringConcatFixture, BM_FlatCord2Concat)
+(benchmark::State &state) {
+  const auto &bucket = data[state.range(0)];
+
+  for (auto _ : state) {
+    using AllocSlice = ArenaAllocator<flatcordsso::Slice>;
+    using AllocChar = ArenaAllocator<char>;
+
+    ArenaState arena;
+    AllocSlice alloc(&arena);
+    flatcordsso::Cord<AllocSlice> cord(alloc);
+    for (const auto &s : bucket) {
+      cord.append(s);
+    }
+    AllocChar alloc2(&arena);
+    MemoryBuffer<ArenaAllocator<char>> buf(alloc2);
+
+    cord.write_to(buf);
+
+    benchmark::DoNotOptimize(buf.data());
+    benchmark::DoNotOptimize(buf.size());
+    benchmark::ClobberMemory();
+  }
+
+  std::size_t total_bytes = 0;
+  for (const auto &s : bucket)
+    total_bytes += s.size();
+
+  state.SetBytesProcessed(
+      static_cast<int64_t>(state.iterations() * total_bytes));
+}
+
+BENCHMARK_REGISTER_F(StringConcatFixture, BM_FlatCord2Concat)
+    ->DenseRange(MIN_RANGE, MAX_RANGE, STEP)
     ->Unit(benchmark::kNanosecond);

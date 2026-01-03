@@ -16,3 +16,14 @@ benchmark_suite(
         "//proto:proto_lib",
     ],
 )
+benchmark_suite(
+    name = "serdel",
+    src = "benchmark_serdel.cc",
+    deps = [
+       "//serdel/msg/base:msg_base_lib",  # 
+       "//serdel/msg/a:a_msg_lib",  # 
+              "//serdel/msg/b:b_msg_lib",  # 
+              "//serdel/serializer:serializer_lib",  # 
+
+    ],
+)

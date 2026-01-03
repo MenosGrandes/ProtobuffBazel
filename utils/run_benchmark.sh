@@ -36,7 +36,7 @@ if [[ ! -f "$BENCH_BINARY" ]]; then
 fi
 rm -rf results.csv
 "$BENCH_BINARY" --benchmark_min_time=2s \
-  --benchmark_repetitions=5 \
+  --benchmark_repetitions=2 \
   --benchmark_report_aggregates_only=true \
   --benchmark_format=csv > "results.csv" &
 

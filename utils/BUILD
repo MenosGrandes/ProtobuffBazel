@@ -17,3 +17,9 @@ filegroup(
     visibility = ["//bench:__pkg__"], #the bench is name of FOLDER!
 
 )
+filegroup(
+    name = "run_valgrind_sh",
+    srcs = ["run_valgrind.sh"],
+    visibility = ["//bench:__pkg__"], #the bench is name of FOLDER!
+
+)
