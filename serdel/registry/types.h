@@ -15,7 +15,9 @@ inline void serialize_msg(
     MsgType t = msg->getType();
     BinarySerde<MsgType>::write(out, t);
     const auto& e = MsgRegistry::instance().get(t);
+    #ifdef USE_RESERVE
     out.reserve(e.approximateSize);
+    #endif
     e.write(out, *msg);
 }
 

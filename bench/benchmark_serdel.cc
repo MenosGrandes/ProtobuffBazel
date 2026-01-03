@@ -65,17 +65,9 @@ TestDataType MakeBenchmarkData(size_t max_len) {
 }
 TestDataType SerdelFixture::data = MakeBenchmarkData(MAX_RANGE);
 
-BENCHMARK_DEFINE_F(SerdelFixture, BM_MsgBBenchmark)(benchmark::State &state) {
+BENCHMARK_DEFINE_F(SerdelFixture, BM_MsgBBenchmarkClean)
+(benchmark::State &state) {
   const auto &bucket = data[state.range(0)];
-  /*
-      {
-        std::unique_ptr<MsgBase> pBase = std::make_unique<B>(make_test_B());
-        serialize_msg(buf, pBase);
-        std::cout << *pBase << "\n";
-      }
-      size_t off = 0;
-      auto msg = deserialize_msg(buf, off);
-  */
 
   for (auto _ : state) {
 
@@ -85,13 +77,31 @@ BENCHMARK_DEFINE_F(SerdelFixture, BM_MsgBBenchmark)(benchmark::State &state) {
       size_t off = 0;
       auto msg = deserialize_msg(buf, off);
       benchmark::DoNotOptimize(msg);
-            benchmark::DoNotOptimize(buf);
-
+      benchmark::DoNotOptimize(buf);
     }
-
   }
 }
+BENCHMARK_REGISTER_F(SerdelFixture, BM_MsgBBenchmarkClean)
+    ->DenseRange(MIN_RANGE, MAX_RANGE, STEP)
+    ->Unit(benchmark::kNanosecond);
 
-BENCHMARK_REGISTER_F(SerdelFixture, BM_MsgBBenchmark)
+#define USE_RESERVE
+BENCHMARK_DEFINE_F(SerdelFixture, BM_MsgBBenchmarkReserve)
+(benchmark::State &state) {
+  const auto &bucket = data[state.range(0)];
+
+  for (auto _ : state) {
+
+    for (const auto &s : bucket) {
+      SerializeBuffer buf;
+      serialize_msg(buf, s);
+      size_t off = 0;
+      auto msg = deserialize_msg(buf, off);
+      benchmark::DoNotOptimize(msg);
+      benchmark::DoNotOptimize(buf);
+    }
+  }
+}
+BENCHMARK_REGISTER_F(SerdelFixture, BM_MsgBBenchmarkReserve)
     ->DenseRange(MIN_RANGE, MAX_RANGE, STEP)
     ->Unit(benchmark::kNanosecond);

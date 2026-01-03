@@ -163,14 +163,31 @@ struct BinarySerde<
 /* ============================================================
    std::map
    ============================================================ */
-template <typename K, typename V> struct BinarySerde<std::map<K, V>> {
+template <typename K, typename V>
+struct BinarySerde<std::map<K, V>> {
   static void write(SerializeBuffer &out, const std::map<K, V> &m) {
-    std::uint64_t size = static_cast<std::uint64_t>(m.size());
+    std::uint64_t size = m.size();
     BinarySerde<std::uint64_t>::write(out, size);
 
-    for (const auto &[k, v] : m) {
-      BinarySerde<K>::write(out, k);
-      BinarySerde<V>::write(out, v);
+    // If trivially copyable, bulk memcpy into preallocated buffer
+    if constexpr (std::is_trivially_copyable_v<K> && std::is_trivially_copyable_v<V>) {
+        size_t total_bytes = size * (sizeof(K) + sizeof(V));
+        size_t old_size = out.size();
+        out.resize(old_size + total_bytes);
+        std::uint8_t *ptr = out.data() + old_size;
+
+        for (auto &[k,v] : m) {
+            std::memcpy(ptr, &k, sizeof(K));
+            ptr += sizeof(K);
+            std::memcpy(ptr, &v, sizeof(V));
+            ptr += sizeof(V);
+        }
+    } else {
+        // Generic fallback for non-trivial types
+        for (const auto &[k,v] : m) {
+            BinarySerde<K>::write(out, k);
+            BinarySerde<V>::write(out, v);
+        }
     }
   }
 
@@ -178,48 +195,88 @@ template <typename K, typename V> struct BinarySerde<std::map<K, V>> {
     std::uint64_t size = BinarySerde<std::uint64_t>::read(in, offset);
     std::map<K, V> m;
 
-    for (std::uint64_t i = 0; i < size; ++i) {
-      K k = BinarySerde<K>::read(in, offset);
-      V v = BinarySerde<V>::read(in, offset);
-      m.emplace(std::move(k), std::move(v));
+    if constexpr (std::is_trivially_copyable_v<K> && std::is_trivially_copyable_v<V>) {
+        m.reserve(size); // Not required for std::map, but keeps semantic similarity
+        for (std::uint64_t i = 0; i < size; ++i) {
+            K k;
+            V v;
+            std::memcpy(&k, in.data() + offset, sizeof(K));
+            offset += sizeof(K);
+            std::memcpy(&v, in.data() + offset, sizeof(V));
+            offset += sizeof(V);
+            m.emplace(std::move(k), std::move(v));
+        }
+    } else {
+        for (std::uint64_t i = 0; i < size; ++i) {
+            K k = BinarySerde<K>::read(in, offset);
+            V v = BinarySerde<V>::read(in, offset);
+            m.emplace(std::move(k), std::move(v));
+        }
     }
 
     return m;
   }
 };
+
 /* ============================================================
-   std::unordered_map
+   Optimized BinarySerde for std::unordered_map
    ============================================================ */
 template <typename K, typename V, typename Hash, typename Eq, typename Alloc>
 struct BinarySerde<std::unordered_map<K, V, Hash, Eq, Alloc>> {
-
   static void write(SerializeBuffer &out,
                     const std::unordered_map<K, V, Hash, Eq, Alloc> &m) {
-    std::uint64_t size = static_cast<std::uint64_t>(m.size());
+    std::uint64_t size = m.size();
     BinarySerde<std::uint64_t>::write(out, size);
 
-    for (const auto &kv : m) {
-      BinarySerde<K>::write(out, kv.first);
-      BinarySerde<V>::write(out, kv.second);
+    if constexpr (std::is_trivially_copyable_v<K> && std::is_trivially_copyable_v<V>) {
+        size_t total_bytes = size * (sizeof(K) + sizeof(V));
+        size_t old_size = out.size();
+        out.resize(old_size + total_bytes);
+        std::uint8_t *ptr = out.data() + old_size;
+
+        for (const auto &kv : m) {
+            std::memcpy(ptr, &kv.first, sizeof(K));
+            ptr += sizeof(K);
+            std::memcpy(ptr, &kv.second, sizeof(V));
+            ptr += sizeof(V);
+        }
+    } else {
+        for (const auto &kv : m) {
+            BinarySerde<K>::write(out, kv.first);
+            BinarySerde<V>::write(out, kv.second);
+        }
     }
   }
 
   static std::unordered_map<K, V, Hash, Eq, Alloc>
   read(const SerializeBuffer &in, size_t &offset) {
-
     std::uint64_t size = BinarySerde<std::uint64_t>::read(in, offset);
     std::unordered_map<K, V, Hash, Eq, Alloc> m;
     m.reserve(static_cast<size_t>(size));
 
-    for (std::uint64_t i = 0; i < size; ++i) {
-      K k = BinarySerde<K>::read(in, offset);
-      V v = BinarySerde<V>::read(in, offset);
-      m.emplace(std::move(k), std::move(v));
+    if constexpr (std::is_trivially_copyable_v<K> && std::is_trivially_copyable_v<V>) {
+        for (std::uint64_t i = 0; i < size; ++i) {
+            K k;
+            V v;
+            std::memcpy(&k, in.data() + offset, sizeof(K));
+            offset += sizeof(K);
+            std::memcpy(&v, in.data() + offset, sizeof(V));
+            offset += sizeof(V);
+            m.emplace(std::move(k), std::move(v));
+        }
+    } else {
+        for (std::uint64_t i = 0; i < size; ++i) {
+            K k = BinarySerde<K>::read(in, offset);
+            V v = BinarySerde<V>::read(in, offset);
+            m.emplace(std::move(k), std::move(v));
+        }
     }
 
     return m;
   }
 };
+
+
 /* ============================================================
    std::optional
    ============================================================ */
