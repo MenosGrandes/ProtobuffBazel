@@ -27,3 +27,11 @@ benchmark_suite(
 
     ],
 )
+benchmark_suite(
+    name = "snake",
+    src = "benchmark_snake.cc",
+    deps = [
+       "//camel:libcamel",  # 
+
+    ],
+)
