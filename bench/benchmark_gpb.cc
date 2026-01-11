@@ -9,9 +9,9 @@ using demo::BigObjectArray;
 using google::protobuf::Arena;
 using google::protobuf::ArenaOptions;
 
-static constexpr auto MIN_RANGE{40};
-static constexpr auto MAX_RANGE{80};
-static constexpr auto STEP{4};
+static constexpr auto MIN_RANGE{1};
+static constexpr auto MAX_RANGE{100};
+static constexpr auto STEP{2};
 
 ////////
 

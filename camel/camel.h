@@ -1,6 +1,7 @@
 #include <array>
 #include <cstddef>
 #include <string>
+#include <cstring>
 #pragma once
 
 template <std::size_t N>
@@ -18,10 +19,12 @@ constexpr auto camelConstexpr(const char (&array)[N]) {
 }
 inline std::string camelRuntime(const char *array) {
   std::string returnString;
+  size_t len = std::strlen(array);
+  returnString.reserve(len * 2);
+
   for (const char *p = array; *p != '\0'; ++p) {
-    char c = *p;
-    returnString += c;
-    returnString += '_';
+    returnString.push_back(*p);
+    returnString.push_back('_');
   }
 
   return returnString;
